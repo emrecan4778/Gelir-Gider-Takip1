@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gelir Gider Takibi</title>
+    
+    <!-- React ve ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+
+        function App() {
+            // Aktif sekme
+            const [activeTab, setActiveTab] = useState('budget');
+
+            // LocalStorage'dan verileri çek
+            const [transactions, setTransactions] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('expense_tracker_data_html');
+                    return saved ? JSON.parse(saved) : [];
+                } catch (error) {
+                    return [];
+                }
+            });
+
+            // Yatırımlar için state
+            const [investments, setInvestments] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('investments_data_html');
+                    return saved ? JSON.parse(saved) : [];
+                } catch (error) {
+                    return [];
+                }
+            });
+
+            // Veriler değiştikçe LocalStorage'a kaydet
+            useEffect(() => {
+                localStorage.setItem('expense_tracker_data_html', JSON.stringify(transactions));
+            }, [transactions]);
+
+            useEffect(() => {
+                localStorage.setItem('investments_data_html', JSON.stringify(investments));
+            }, [investments]);
+            
+            // Ay Seçimi
+            const getCurrentMonthYear = () => {
+                const d = new Date();
+                const month = (d.getMonth() + 1).toString().padStart(2, '0');
+                return `${d.getFullYear()}-${month}`;
+            };
+            const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthYear());
+
+            // Form Stateleri
+            const [type, setType] = useState('expense');
+            const [amount, setAmount] = useState('');
+            const [category, setCategory] = useState('Market');
+            const [description, setDescription] = useState('');
+            const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+            const expenseCategories = ['Market', 'Fatura', 'Kira', 'Ulaşım', 'Yemek', 'Eğlence', 'Sağlık', 'Diğer'];
+            const incomeCategories = ['Maaş', 'Prim', 'Yatırım', 'Borç Geri Dönüşü', 'Ek İş', 'Diğer'];
+
+            // Yatırım form stateleri
+            const [invType, setInvType] = useState('Hisse Senedi');
+            const [invName, setInvName] = useState('');
+            const [invQuantity, setInvQuantity] = useState('');
+            const [invBuyPrice, setInvBuyPrice] = useState('');
+            const [invBuyDate, setInvBuyDate] = useState(new Date().toISOString().split('T')[0]);
+            const [invNotes, setInvNotes] = useState('');
+
+            const investmentTypes = ['Hisse Senedi', 'Kripto Para', 'Altın', 'Döviz', 'Tahvil', 'Fon', 'Diğer'];
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!amount || isNaN(amount) || Number(amount) <= 0) return;
+
+                const newTransaction = {
+                    id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(),
+                    type,
+                    amount: parseFloat(amount),
+                    category,
+                    description,
+                    date,
+                    timestamp: new Date().getTime()
+                };
+
+                setTransactions([newTransaction, ...transactions]);
+                setAmount('');
+                setDescription('');
+            };
+
+            const handleDelete = (id) => {
+                setTransactions(transactions.filter(t => t.id !== id));
+            };
+
+            const filteredTransactions = useMemo(() => {
+                if (!selectedMonth) return transactions;
+                return transactions.filter(t => t.date.startsWith(selectedMonth));
+            }, [transactions, selectedMonth]);
+
+            const summary = useMemo(() => {
+                const income = filteredTransactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
+                const expense = filteredTransactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
+                return { income, expense, balance: income - expense };
+            }, [filteredTransactions]);
+
+            const handleTypeChange = (newType) => {
+                setType(newType);
+                setCategory(newType === 'expense' ? expenseCategories[0] : incomeCategories[0]);
+            };
+
+            // Yatırım ekleme fonksiyonu
+            const handleInvestmentSubmit = (e) => {
+                e.preventDefault();
+                if (!invName || !invQuantity || !invBuyPrice || isNaN(invQuantity) || isNaN(invBuyPrice)) return;
+
+                const newInvestment = {
+                    id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(),
+                    type: invType,
+                    name: invName,
+                    quantity: parseFloat(invQuantity),
+                    buyPrice: parseFloat(invBuyPrice),
+                    buyDate: invBuyDate,
+                    notes: invNotes,
+                    status: 'active', // active veya sold
+                    sellPrice: null,
+                    sellDate: null,
+                    timestamp: new Date().getTime()
+                };
+
+                setInvestments([newInvestment, ...investments]);
+                setInvName('');
+                setInvQuantity('');
+                setInvBuyPrice('');
+                setInvNotes('');
+            };
+
+            // Yatırım satma fonksiyonu
+            const handleSellInvestment = (id, sellPrice) => {
+                const price = prompt('Satış fiyatını girin (adet başına):');
+                if (!price || isNaN(price)) return;
+
+                setInvestments(investments.map(inv => 
+                    inv.id === id 
+                        ? { ...inv, status: 'sold', sellPrice: parseFloat(price), sellDate: new Date().toISOString().split('T')[0] }
+                        : inv
+                ));
+            };
+
+            // Yatırım silme
+            const handleDeleteInvestment = (id) => {
+                if (confirm('Bu yatırımı silmek istediğinize emin misiniz?')) {
+                    setInvestments(investments.filter(inv => inv.id !== id));
+                }
+            };
+
+            // Yatırım özeti
+            const investmentSummary = useMemo(() => {
+                const active = investments.filter(inv => inv.status === 'active');
+                const sold = investments.filter(inv => inv.status === 'sold');
+                
+                const totalInvested = active.reduce((acc, inv) => acc + (inv.quantity * inv.buyPrice), 0);
+                
+                const totalProfit = sold.reduce((acc, inv) => {
+                    const profit = (inv.sellPrice - inv.buyPrice) * inv.quantity;
+                    return acc + profit;
+                }, 0);
+
+                return { totalInvested, totalProfit, activeCount: active.length, soldCount: sold.length };
+            }, [investments]);
+
+            return (
+                <div className="min-h-screen p-4 md:p-8">
+                    <div className="max-w-4xl mx-auto space-y-6">
+                        
+                        {/* Başlık ve Sekmeler */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                            <div>
+                                <h1 className="text-2xl md:text-3xl font-bold text-slate-900">Finans Takip</h1>
+                                <p className="text-slate-500 text-sm mt-1">Bütçe ve yatırımlarını yönet</p>
+                            </div>
+                            
+                            {/* Sekme Butonları */}
+                            <div className="flex bg-white rounded-xl border border-slate-200 shadow-sm p-1">
+                                <button
+                                    onClick={() => setActiveTab('budget')}
+                                    className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                        activeTab === 'budget' 
+                                            ? 'bg-blue-500 text-white shadow' 
+                                            : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                >
+                                    💰 Bütçe
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('investments')}
+                                    className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${
+                                        activeTab === 'investments' 
+                                            ? 'bg-blue-500 text-white shadow' 
+                                            : 'text-slate-600 hover:text-slate-900'
+                                    }`}
+                                >
+                                    📊 Yatırımlar
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Bütçe Ekranı */}
+                        {activeTab === 'budget' && (
+                            <>
+                                {/* Ay Seçici */}
+                                <div className="flex justify-end">
+                                    <div className="flex items-center space-x-2 bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm">
+                                        <span>📅</span>
+                                        <input
+                                            type="month"
+                                            value={selectedMonth}
+                                            onChange={(e) => setSelectedMonth(e.target.value)}
+                                            className="outline-none bg-transparent font-medium text-slate-700 w-full cursor-pointer"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Özet Kartları */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex items-center space-x-4">
+                                        <div className="p-3 bg-blue-50 text-blue-600 rounded-xl text-2xl">💰</div>
+                                        <div>
+                                            <p className="text-sm text-slate-500 font-medium">Toplam Bakiye</p>
+                                            <h2 className={`text-2xl font-bold ${summary.balance >= 0 ? 'text-slate-900' : 'text-red-600'}`}>
+                                                {summary.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                            </h2>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex items-center space-x-4">
+                                        <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl text-2xl">📈</div>
+                                        <div>
+                                            <p className="text-sm text-slate-500 font-medium">Toplam Gelir</p>
+                                            <h2 className="text-2xl font-bold text-emerald-600">
+                                                {summary.income.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                            </h2>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex items-center space-x-4">
+                                        <div className="p-3 bg-red-50 text-red-600 rounded-xl text-2xl">📉</div>
+                                        <div>
+                                            <p className="text-sm text-slate-500 font-medium">Toplam Gider</p>
+                                            <h2 className="text-2xl font-bold text-red-600">
+                                                {summary.expense.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                            </h2>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    
+                                    {/* Form */}
+                                    <div className="lg:col-span-1">
+                                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                                            <h3 className="text-lg font-semibold mb-4">Yeni İşlem Ekle</h3>
+                                            
+                                            <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+                                                <button
+                                                    onClick={() => handleTypeChange('expense')}
+                                                    className={`flex-1 flex items-center justify-center space-x-2 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                                        type === 'expense' ? 'bg-white shadow text-red-600' : 'text-slate-500'
+                                                    }`}
+                                                >
+                                                    <span>➖</span> <span>Gider</span>
+                                                </button>
+                                                <button
+                                                    onClick={() => handleTypeChange('income')}
+                                                    className={`flex-1 flex items-center justify-center space-x-2 py-2 text-sm font-medium rounded-lg transition-colors ${
+                                                        type === 'income' ? 'bg-white shadow text-emerald-600' : 'text-slate-500'
+                                                    }`}
+                                                >
+                                                    <span>➕</span> <span>Gelir</span>
+                                                </button>
+                                            </div>
+
+                                            <form onSubmit={handleSubmit} className="space-y-4">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Tutar (₺)</label>
+                                                    <input
+                                                        type="number" step="0.01" min="0" value={amount}
+                                                        onChange={(e) => setAmount(e.target.value)}
+                                                        placeholder="0.00" required
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">🏷️ Kategori</label>
+                                                    <select
+                                                        value={category} onChange={(e) => setCategory(e.target.value)}
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                                                    >
+                                                        {type === 'expense' 
+                                                            ? expenseCategories.map(c => <option key={c} value={c}>{c}</option>)
+                                                            : incomeCategories.map(c => <option key={c} value={c}>{c}</option>)
+                                                        }
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">📅 Tarih</label>
+                                                    <input
+                                                        type="date" value={date} onChange={(e) => setDate(e.target.value)} required
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">📝 Açıklama</label>
+                                                    <input
+                                                        type="text" value={description} onChange={(e) => setDescription(e.target.value)}
+                                                        placeholder="Örn: Hafta sonu alışverişi"
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="submit"
+                                                    className={`w-full py-3 rounded-xl text-white font-medium ${
+                                                        type === 'expense' ? 'bg-red-500 hover:bg-red-600' : 'bg-emerald-500 hover:bg-emerald-600'
+                                                    }`}
+                                                >
+                                                    {type === 'expense' ? 'Gider Ekle' : 'Gelir Ekle'}
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+
+                                    {/* Liste */}
+                                    <div className="lg:col-span-2">
+                                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 h-full min-h-[400px]">
+                                            <h3 className="text-lg font-semibold mb-6">
+                                                {selectedMonth ? `${selectedMonth.split('-')[1]}/${selectedMonth.split('-')[0]} İşlemleri` : 'Son İşlemler'}
+                                            </h3>
+                                            
+                                            {filteredTransactions.length === 0 ? (
+                                                <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+                                                    <span className="text-4xl mb-3 opacity-50">💰</span>
+                                                    <p>Bu ay için henüz hiçbir işlem eklenmedi.</p>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-3 overflow-y-auto pr-2 max-h-[500px] custom-scrollbar">
+                                                    {filteredTransactions.map((t) => (
+                                                        <div key={t.id} className="group flex items-center justify-between p-4 rounded-xl border border-slate-100 hover:border-slate-200 bg-slate-50 hover:bg-white transition-all">
+                                                            <div className="flex items-center space-x-4">
+                                                                <div className={`p-3 rounded-full text-lg ${t.type === 'expense' ? 'bg-red-100' : 'bg-emerald-100'}`}>
+                                                                    {t.type === 'expense' ? '📉' : '📈'}
+                                                                </div>
+                                                                <div>
+                                                                    <p className="font-semibold text-slate-900">{t.category}</p>
+                                                                    <div className="flex items-center text-xs text-slate-500 space-x-2">
+                                                                        <span>{new Date(t.date).toLocaleDateString('tr-TR')}</span>
+                                                                        {t.description && (
+                                                                            <>
+                                                                                <span>•</span>
+                                                                                <span className="truncate max-w-[150px]">{t.description}</span>
+                                                                            </>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center space-x-4">
+                                                                <span className={`font-bold whitespace-nowrap ${t.type === 'expense' ? 'text-red-600' : 'text-emerald-600'}`}>
+                                                                    {t.type === 'expense' ? '-' : '+'} {t.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                </span>
+                                                                <button 
+                                                                    onClick={() => handleDelete(t.id)}
+                                                                    className="text-slate-300 hover:text-red-500 transition-colors"
+                                                                    title="İşlemi Sil"
+                                                                >
+                                                                    🗑️
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </>
+                        )}
+
+                        {/* Yatırım Ekranı */}
+                        {activeTab === 'investments' && (
+                            <>
+                                {/* Yatırım Özet Kartları */}
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                                        <div className="flex items-center space-x-3 mb-2">
+                                            <span className="text-2xl">💼</span>
+                                            <p className="text-sm text-slate-500 font-medium">Aktif Yatırım</p>
+                                        </div>
+                                        <h2 className="text-2xl font-bold text-slate-900">{investmentSummary.activeCount}</h2>
+                                    </div>
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                                        <div className="flex items-center space-x-3 mb-2">
+                                            <span className="text-2xl">💵</span>
+                                            <p className="text-sm text-slate-500 font-medium">Toplam Yatırım</p>
+                                        </div>
+                                        <h2 className="text-2xl font-bold text-blue-600">
+                                            {investmentSummary.totalInvested.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                        </h2>
+                                    </div>
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                                        <div className="flex items-center space-x-3 mb-2">
+                                            <span className="text-2xl">💎</span>
+                                            <p className="text-sm text-slate-500 font-medium">Satılan</p>
+                                        </div>
+                                        <h2 className="text-2xl font-bold text-slate-900">{investmentSummary.soldCount}</h2>
+                                    </div>
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                                        <div className="flex items-center space-x-3 mb-2">
+                                            <span className="text-2xl">{investmentSummary.totalProfit >= 0 ? '📈' : '📉'}</span>
+                                            <p className="text-sm text-slate-500 font-medium">Toplam Kâr/Zarar</p>
+                                        </div>
+                                        <h2 className={`text-2xl font-bold ${investmentSummary.totalProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                            {investmentSummary.totalProfit >= 0 ? '+' : ''}{investmentSummary.totalProfit.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                        </h2>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    
+                                    {/* Yatırım Ekleme Formu */}
+                                    <div className="lg:col-span-1">
+                                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                                            <h3 className="text-lg font-semibold mb-4">Yeni Yatırım Ekle</h3>
+                                            
+                                            <form onSubmit={handleInvestmentSubmit} className="space-y-4">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Yatırım Türü</label>
+                                                    <select
+                                                        value={invType} 
+                                                        onChange={(e) => setInvType(e.target.value)}
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+                                                    >
+                                                        {investmentTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">İsim / Sembol</label>
+                                                    <input
+                                                        type="text" 
+                                                        value={invName}
+                                                        onChange={(e) => setInvName(e.target.value)}
+                                                        placeholder="Örn: THYAO, BTC, Altın" 
+                                                        required
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Miktar / Adet</label>
+                                                    <input
+                                                        type="number" 
+                                                        step="0.00000001"
+                                                        min="0" 
+                                                        value={invQuantity}
+                                                        onChange={(e) => setInvQuantity(e.target.value)}
+                                                        placeholder="100" 
+                                                        required
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">Alış Fiyatı (₺)</label>
+                                                    <input
+                                                        type="number" 
+                                                        step="0.01" 
+                                                        min="0" 
+                                                        value={invBuyPrice}
+                                                        onChange={(e) => setInvBuyPrice(e.target.value)}
+                                                        placeholder="0.00" 
+                                                        required
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">📅 Alış Tarihi</label>
+                                                    <input
+                                                        type="date" 
+                                                        value={invBuyDate} 
+                                                        onChange={(e) => setInvBuyDate(e.target.value)} 
+                                                        required
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-slate-700 mb-1">📝 Notlar</label>
+                                                    <input
+                                                        type="text" 
+                                                        value={invNotes} 
+                                                        onChange={(e) => setInvNotes(e.target.value)}
+                                                        placeholder="Opsiyonel"
+                                                        className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="submit"
+                                                    className="w-full py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-medium"
+                                                >
+                                                    Yatırım Ekle
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+
+                                    {/* Yatırım Listesi */}
+                                    <div className="lg:col-span-2">
+                                        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 min-h-[400px]">
+                                            <h3 className="text-lg font-semibold mb-6">Yatırımlarım</h3>
+                                            
+                                            {investments.length === 0 ? (
+                                                <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+                                                    <span className="text-4xl mb-3 opacity-50">📊</span>
+                                                    <p>Henüz hiçbir yatırım eklenmedi.</p>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-4 overflow-y-auto pr-2 max-h-[600px] custom-scrollbar">
+                                                    {investments.map((inv) => {
+                                                        const totalCost = inv.quantity * inv.buyPrice;
+                                                        const currentValue = inv.status === 'sold' 
+                                                            ? inv.quantity * inv.sellPrice 
+                                                            : totalCost;
+                                                        const profit = inv.status === 'sold' 
+                                                            ? (inv.sellPrice - inv.buyPrice) * inv.quantity 
+                                                            : 0;
+                                                        const profitPercent = inv.status === 'sold'
+                                                            ? ((inv.sellPrice - inv.buyPrice) / inv.buyPrice * 100)
+                                                            : 0;
+
+                                                        return (
+                                                            <div key={inv.id} className={`rounded-2xl border-2 overflow-hidden transition-all ${
+                                                                inv.status === 'sold' 
+                                                                    ? 'bg-gradient-to-br from-slate-50 to-slate-100 border-slate-200' 
+                                                                    : 'bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200 shadow-sm'
+                                                            }`}>
+                                                                {/* Header */}
+                                                                <div className="bg-white bg-opacity-60 backdrop-blur-sm p-4 border-b border-slate-200">
+                                                                    <div className="flex items-center justify-between">
+                                                                        <div className="flex items-center space-x-3">
+                                                                            <div className={`p-2.5 rounded-xl text-xl ${
+                                                                                inv.status === 'sold' ? 'bg-slate-200' : 'bg-blue-500 text-white'
+                                                                            }`}>
+                                                                                {inv.type === 'Hisse Senedi' ? '📈' : 
+                                                                                 inv.type === 'Kripto Para' ? '₿' :
+                                                                                 inv.type === 'Altın' ? '🪙' :
+                                                                                 inv.type === 'Döviz' ? '💵' :
+                                                                                 inv.type === 'Tahvil' ? '📜' :
+                                                                                 inv.type === 'Fon' ? '💼' : '💎'}
+                                                                            </div>
+                                                                            <div>
+                                                                                <h4 className="font-bold text-lg text-slate-900">{inv.name}</h4>
+                                                                                <p className="text-xs text-slate-500">{inv.type}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex items-center space-x-2">
+                                                                            {inv.status === 'sold' && (
+                                                                                <span className="px-3 py-1.5 rounded-full bg-emerald-500 text-white text-xs font-bold shadow-sm">
+                                                                                    ✓ SATILDI
+                                                                                </span>
+                                                                            )}
+                                                                            {inv.status === 'active' && (
+                                                                                <span className="px-3 py-1.5 rounded-full bg-blue-500 text-white text-xs font-bold shadow-sm animate-pulse">
+                                                                                    ● AKTİF
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Content */}
+                                                                <div className="p-5">
+                                                                    {/* Timeline */}
+                                                                    <div className="relative mb-5">
+                                                                        <div className="flex items-center justify-between mb-2">
+                                                                            <div className="flex-1">
+                                                                                <div className="flex items-center space-x-2 mb-2">
+                                                                                    <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-lg"></div>
+                                                                                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Alış</span>
+                                                                                </div>
+                                                                                <div className="ml-5 bg-white rounded-lg p-3 shadow-sm border border-emerald-100">
+                                                                                    <div className="text-xs text-slate-500 mb-1">📅 {new Date(inv.buyDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                                                                                    <div className="font-bold text-slate-900">
+                                                                                        {inv.quantity} adet × {inv.buyPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                    </div>
+                                                                                    <div className="text-sm text-emerald-600 font-bold mt-1">
+                                                                                        Toplam: {totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+
+                                                                            {inv.status === 'sold' && (
+                                                                                <>
+                                                                                    <div className="flex items-center justify-center px-4">
+                                                                                        <div className="flex flex-col items-center">
+                                                                                            <div className="w-0.5 h-8 bg-gradient-to-b from-emerald-500 to-blue-500"></div>
+                                                                                            <div className="text-2xl my-1">
+                                                                                                {profit >= 0 ? '📈' : '📉'}
+                                                                                            </div>
+                                                                                            <div className="w-0.5 h-8 bg-gradient-to-b from-blue-500 to-red-500"></div>
+                                                                                        </div>
+                                                                                    </div>
+
+                                                                                    <div className="flex-1">
+                                                                                        <div className="flex items-center space-x-2 mb-2">
+                                                                                            <div className="w-3 h-3 rounded-full bg-red-500 shadow-lg"></div>
+                                                                                            <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Satış</span>
+                                                                                        </div>
+                                                                                        <div className="ml-5 bg-white rounded-lg p-3 shadow-sm border border-red-100">
+                                                                                            <div className="text-xs text-slate-500 mb-1">📅 {new Date(inv.sellDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                                                                                            <div className="font-bold text-slate-900">
+                                                                                                {inv.quantity} adet × {inv.sellPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                            </div>
+                                                                                            <div className="text-sm text-red-600 font-bold mt-1">
+                                                                                                Toplam: {currentValue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Profit/Loss Box */}
+                                                                    {inv.status === 'sold' && (
+                                                                        <div className={`rounded-xl p-4 mb-4 ${
+                                                                            profit >= 0 
+                                                                                ? 'bg-gradient-to-r from-emerald-500 to-emerald-600' 
+                                                                                : 'bg-gradient-to-r from-red-500 to-red-600'
+                                                                        } text-white shadow-lg`}>
+                                                                            <div className="text-xs font-semibold uppercase tracking-wide mb-1 opacity-90">
+                                                                                {profit >= 0 ? '🎉 KAR' : '⚠️ ZARAR'}
+                                                                            </div>
+                                                                            <div className="flex items-end justify-between">
+                                                                                <div className="text-3xl font-black">
+                                                                                    {profit >= 0 ? '+' : ''}{profit.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                </div>
+                                                                                <div className="text-xl font-bold">
+                                                                                    {profit >= 0 ? '+' : ''}{profitPercent.toFixed(2)}%
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Notes */}
+                                                                    {inv.notes && (
+                                                                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                                                                            <div className="flex items-start space-x-2">
+                                                                                <span className="text-amber-600">📝</span>
+                                                                                <p className="text-sm text-amber-900 flex-1">{inv.notes}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Action Buttons */}
+                                                                    <div className="flex space-x-2">
+                                                                        {inv.status === 'active' && (
+                                                                            <button
+                                                                                onClick={() => handleSellInvestment(inv.id)}
+                                                                                className="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold rounded-xl transition-all shadow-md hover:shadow-lg transform hover:scale-105"
+                                                                            >
+                                                                                💵 Sat
+                                                                            </button>
+                                                                        )}
+                                                                        <button
+                                                                            onClick={() => handleDeleteInvestment(inv.id)}
+                                                                            className="px-4 py-3 bg-white hover:bg-red-50 text-red-600 font-bold rounded-xl transition-all border-2 border-red-200 hover:border-red-300"
+                                                                        >
+                                                                            🗑️ Sil
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                </div>
+                            </>
+                        )}
+
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
