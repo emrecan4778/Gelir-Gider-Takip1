@@ -75,7 +75,7 @@
             const [description, setDescription] = useState('');
             const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-            const expenseCategories = ['Market', 'Fatura', 'Kira', 'Ulaşım', 'Yemek', 'Eğlence', 'Sağlık', 'Diğer'];
+            const expenseCategories = ['Market', 'Fatura', 'Kira', 'Ulaşım', 'Yemek', 'Eğlence', 'Sağlık', 'Kredi Kartı', 'Diğer'];
             const incomeCategories = ['Maaş', 'Prim', 'Yatırım', 'Borç Geri Dönüşü', 'Ek İş', 'Diğer'];
 
             // Yatırım form stateleri
@@ -85,6 +85,63 @@
             const [invBuyPrice, setInvBuyPrice] = useState('');
             const [invBuyDate, setInvBuyDate] = useState(new Date().toISOString().split('T')[0]);
             const [invNotes, setInvNotes] = useState('');
+            const [editingInvestment, setEditingInvestment] = useState(null);
+
+            // Filtre state'i
+            const [filterType, setFilterType] = useState(null); // 'income' veya 'expense'
+
+            // Hesabım ayarları
+            const [userEmail, setUserEmail] = useState(() => {
+                return localStorage.getItem('user_email') || 'emrecan4778.88@gmail.com';
+            });
+            const [theme, setTheme] = useState(() => {
+                return localStorage.getItem('app_theme') || 'light';
+            });
+            const [notifications, setNotifications] = useState(() => {
+                const saved = localStorage.getItem('notifications_enabled');
+                return saved ? JSON.parse(saved) : true;
+            });
+            const [language, setLanguage] = useState(() => {
+                return localStorage.getItem('app_language') || 'tr';
+            });
+
+            // Tema değiştiğinde kaydet
+            useEffect(() => {
+                localStorage.setItem('app_theme', theme);
+                if (theme === 'dark') {
+                    document.body.classList.add('dark');
+                } else {
+                    document.body.classList.remove('dark');
+                }
+            }, [theme]);
+
+            // Bildirim ayarı değiştiğinde kaydet
+            useEffect(() => {
+                localStorage.setItem('notifications_enabled', JSON.stringify(notifications));
+            }, [notifications]);
+
+            // Dil değiştiğinde kaydet
+            useEffect(() => {
+                localStorage.setItem('app_language', language);
+            }, [language]);
+
+            // Şifre değiştirme
+            const handlePasswordChange = () => {
+                const currentPassword = prompt('Mevcut şifrenizi girin:');
+                if (!currentPassword) return;
+                
+                const newPassword = prompt('Yeni şifrenizi girin:');
+                if (!newPassword) return;
+                
+                const confirmPassword = prompt('Yeni şifrenizi tekrar girin:');
+                if (newPassword !== confirmPassword) {
+                    alert('Şifreler eşleşmiyor!');
+                    return;
+                }
+                
+                // Gerçek uygulamada burada API çağrısı yapılır
+                alert('Şifre değiştirme özelliği yakında aktif olacak!');
+            };
 
             const investmentTypes = ['Hisse Senedi', 'Kripto Para', 'Altın', 'Döviz', 'Tahvil', 'Fon', 'Diğer'];
 
@@ -102,7 +159,10 @@
                     timestamp: new Date().getTime()
                 };
 
-                setTransactions([newTransaction, ...transactions]);
+                // State'i hemen güncelle
+                setTransactions(prev => [newTransaction, ...prev]);
+                
+                // Formu temizle
                 setAmount('');
                 setDescription('');
             };
@@ -112,41 +172,104 @@
             };
 
             const filteredTransactions = useMemo(() => {
-                if (!selectedMonth) return transactions;
-                return transactions.filter(t => t.date.startsWith(selectedMonth));
-            }, [transactions, selectedMonth]);
+                let filtered = selectedMonth 
+                    ? transactions.filter(t => t.date.startsWith(selectedMonth))
+                    : transactions;
+                
+                // Tip filtreleme ekle
+                if (filterType) {
+                    filtered = filtered.filter(t => t.type === filterType);
+                }
+                
+                return filtered;
+            }, [transactions, selectedMonth, filterType]);
 
             const summary = useMemo(() => {
                 const income = filteredTransactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
                 const expense = filteredTransactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
-                return { income, expense, balance: income - expense };
-            }, [filteredTransactions]);
+                
+                // O ayki aktif yatırımların toplamını hesapla
+                const monthInvestments = investments.filter(inv => {
+                    if (!selectedMonth) return inv.status === 'active';
+                    return inv.buyDate.startsWith(selectedMonth) && inv.status === 'active';
+                }).reduce((acc, inv) => acc + (inv.quantity * inv.buyPrice), 0);
+                
+                return { 
+                    income, 
+                    expense, 
+                    monthInvestments,
+                    balance: income - expense - monthInvestments 
+                };
+            }, [filteredTransactions, investments, selectedMonth]);
 
             const handleTypeChange = (newType) => {
                 setType(newType);
                 setCategory(newType === 'expense' ? expenseCategories[0] : incomeCategories[0]);
             };
 
-            // Yatırım ekleme fonksiyonu
+            // Yatırım ekleme/düzenleme fonksiyonu
             const handleInvestmentSubmit = (e) => {
                 e.preventDefault();
                 if (!invName || !invQuantity || !invBuyPrice || isNaN(invQuantity) || isNaN(invBuyPrice)) return;
 
-                const newInvestment = {
-                    id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(),
-                    type: invType,
-                    name: invName,
-                    quantity: parseFloat(invQuantity),
-                    buyPrice: parseFloat(invBuyPrice),
-                    buyDate: invBuyDate,
-                    notes: invNotes,
-                    status: 'active', // active veya sold
-                    sellPrice: null,
-                    sellDate: null,
-                    timestamp: new Date().getTime()
-                };
+                if (editingInvestment) {
+                    // Düzenleme modu
+                    setInvestments(investments.map(inv => 
+                        inv.id === editingInvestment.id
+                            ? {
+                                ...inv,
+                                type: invType,
+                                name: invName,
+                                quantity: parseFloat(invQuantity),
+                                buyPrice: parseFloat(invBuyPrice),
+                                buyDate: invBuyDate,
+                                notes: invNotes
+                            }
+                            : inv
+                    ));
+                    setEditingInvestment(null);
+                } else {
+                    // Yeni ekleme
+                    const newInvestment = {
+                        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(),
+                        type: invType,
+                        name: invName,
+                        quantity: parseFloat(invQuantity),
+                        buyPrice: parseFloat(invBuyPrice),
+                        buyDate: invBuyDate,
+                        notes: invNotes,
+                        status: 'active',
+                        sellPrice: null,
+                        sellDate: null,
+                        timestamp: new Date().getTime()
+                    };
 
-                setInvestments([newInvestment, ...investments]);
+                    setInvestments([newInvestment, ...investments]);
+                }
+                
+                // Formu temizle
+                setInvName('');
+                setInvQuantity('');
+                setInvBuyPrice('');
+                setInvNotes('');
+            };
+
+            // Yatırım düzenleme
+            const handleEditInvestment = (inv) => {
+                setEditingInvestment(inv);
+                setInvType(inv.type);
+                setInvName(inv.name);
+                setInvQuantity(inv.quantity.toString());
+                setInvBuyPrice(inv.buyPrice.toString());
+                setInvBuyDate(inv.buyDate);
+                setInvNotes(inv.notes || '');
+                // Forma scroll
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            // Düzenlemeyi iptal et
+            const handleCancelEdit = () => {
+                setEditingInvestment(null);
                 setInvName('');
                 setInvQuantity('');
                 setInvBuyPrice('');
@@ -172,6 +295,56 @@
                 }
             };
 
+            // Verileri dışa aktar
+            const handleExportData = () => {
+                const data = {
+                    transactions,
+                    investments,
+                    exportDate: new Date().toISOString()
+                };
+                const dataStr = JSON.stringify(data, null, 2);
+                const blob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `finans-verileri-${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                URL.revokeObjectURL(url);
+            };
+
+            // Verileri içe aktar
+            const handleImportData = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        if (confirm('Mevcut verileriniz silinecek ve yeni veriler yüklenecek. Devam etmek istiyor musunuz?')) {
+                            if (data.transactions) setTransactions(data.transactions);
+                            if (data.investments) setInvestments(data.investments);
+                            alert('Veriler başarıyla yüklendi!');
+                        }
+                    } catch (error) {
+                        alert('Dosya okunamadı. Lütfen geçerli bir JSON dosyası seçin.');
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = ''; // Reset input
+            };
+
+            // Tüm verileri temizle
+            const handleClearAllData = () => {
+                if (confirm('TÜM VERİLERİNİZ SİLİNECEK! Bu işlem geri alınamaz. Devam etmek istediğinize emin misiniz?')) {
+                    if (confirm('Son kez soruyoruz: Tüm işlemler ve yatırımlar silinecek. Emin misiniz?')) {
+                        setTransactions([]);
+                        setInvestments([]);
+                        alert('Tüm veriler temizlendi.');
+                    }
+                }
+            };
+
             // Yatırım özeti
             const investmentSummary = useMemo(() => {
                 const active = investments.filter(inv => inv.status === 'active');
@@ -192,34 +365,83 @@
                     <div className="max-w-4xl mx-auto space-y-6">
                         
                         {/* Başlık ve Sekmeler */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex flex-col gap-4">
                             <div>
                                 <h1 className="text-2xl md:text-3xl font-bold text-slate-900">Finans Takip</h1>
                                 <p className="text-slate-500 text-sm mt-1">Bütçe ve yatırımlarını yönet</p>
                             </div>
                             
-                            {/* Sekme Butonları */}
-                            <div className="flex bg-white rounded-xl border border-slate-200 shadow-sm p-1">
-                                <button
-                                    onClick={() => setActiveTab('budget')}
-                                    className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                        activeTab === 'budget' 
-                                            ? 'bg-blue-500 text-white shadow' 
-                                            : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                                >
-                                    💰 Bütçe
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab('investments')}
-                                    className={`px-6 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                        activeTab === 'investments' 
-                                            ? 'bg-blue-500 text-white shadow' 
-                                            : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                                >
-                                    📊 Yatırımlar
-                                </button>
+                            <div className="flex flex-col sm:flex-row gap-2">
+                                {/* Sekme Butonları */}
+                                <div className="flex bg-white rounded-xl border border-slate-200 shadow-sm p-1 overflow-x-auto">
+                                    <button
+                                        onClick={() => setActiveTab('budget')}
+                                        className={`px-4 sm:px-6 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                                            activeTab === 'budget' 
+                                                ? 'bg-blue-500 text-white shadow' 
+                                                : 'text-slate-600 hover:text-slate-900'
+                                        }`}
+                                    >
+                                        💰 Bütçe
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('investments')}
+                                        className={`px-4 sm:px-6 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                                            activeTab === 'investments' 
+                                                ? 'bg-blue-500 text-white shadow' 
+                                                : 'text-slate-600 hover:text-slate-900'
+                                        }`}
+                                    >
+                                        📊 Yatırımlar
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('account')}
+                                        className={`px-4 sm:px-6 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                                            activeTab === 'account' 
+                                                ? 'bg-blue-500 text-white shadow' 
+                                                : 'text-slate-600 hover:text-slate-900'
+                                        }`}
+                                    >
+                                        ⚙️ Hesabım
+                                    </button>
+                                </div>
+
+                                {/* Veri Yönetimi Dropdown */}
+                                <div className="relative group">
+                                    <button className="w-full sm:w-auto px-4 py-2 bg-white rounded-xl border border-slate-200 shadow-sm text-slate-700 hover:bg-slate-50 transition-colors flex items-center justify-center space-x-2">
+                                        <span>⚙️</span>
+                                        <span className="text-sm font-medium">Veri Yönetimi</span>
+                                    </button>
+                                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl border border-slate-200 shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                                        <div className="p-2">
+                                            <button
+                                                onClick={handleExportData}
+                                                className="w-full text-left px-4 py-2.5 hover:bg-blue-50 rounded-lg text-sm font-medium text-slate-700 flex items-center space-x-2"
+                                            >
+                                                <span>📤</span>
+                                                <span>Verileri Dışa Aktar</span>
+                                            </button>
+                                            <label className="w-full text-left px-4 py-2.5 hover:bg-green-50 rounded-lg text-sm font-medium text-slate-700 flex items-center space-x-2 cursor-pointer">
+                                                <span>📥</span>
+                                                <span>Verileri İçe Aktar</span>
+                                                <input
+                                                    type="file"
+                                                    accept=".json"
+                                                    onChange={handleImportData}
+                                                    className="hidden"
+                                                />
+                                            </label>
+                                            <div className="border-t border-slate-200 my-2"></div>
+                                            <button
+                                                onClick={handleClearAllData}
+                                                className="w-full text-left px-4 py-2.5 hover:bg-red-50 rounded-lg text-sm font-medium text-red-600 flex items-center space-x-2"
+                                            >
+                                                <span>🗑️</span>
+                                                <span>Tüm Verileri Temizle</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -240,32 +462,64 @@
                                 </div>
 
                                 {/* Özet Kartları */}
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex items-center space-x-4">
-                                        <div className="p-3 bg-blue-50 text-blue-600 rounded-xl text-2xl">💰</div>
-                                        <div>
-                                            <p className="text-sm text-slate-500 font-medium">Toplam Bakiye</p>
-                                            <h2 className={`text-2xl font-bold ${summary.balance >= 0 ? 'text-slate-900' : 'text-red-600'}`}>
-                                                {summary.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
-                                            </h2>
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <button
+                                        onClick={() => setFilterType(null)}
+                                        className={`bg-white rounded-2xl p-6 shadow-sm border-2 transition-all text-left hover:shadow-md ${
+                                            filterType === null ? 'border-blue-400' : 'border-slate-100'
+                                        }`}
+                                    >
+                                        <div className="flex items-center space-x-4">
+                                            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl text-2xl">💰</div>
+                                            <div>
+                                                <p className="text-sm text-slate-500 font-medium">Toplam Bakiye</p>
+                                                <h2 className={`text-2xl font-bold ${summary.balance >= 0 ? 'text-slate-900' : 'text-red-600'}`}>
+                                                    {summary.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
+                                                </h2>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex items-center space-x-4">
-                                        <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl text-2xl">📈</div>
-                                        <div>
-                                            <p className="text-sm text-slate-500 font-medium">Toplam Gelir</p>
-                                            <h2 className="text-2xl font-bold text-emerald-600">
-                                                {summary.income.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
-                                            </h2>
+                                    </button>
+                                    <button
+                                        onClick={() => setFilterType('income')}
+                                        className={`bg-white rounded-2xl p-6 shadow-sm border-2 transition-all text-left hover:shadow-md ${
+                                            filterType === 'income' ? 'border-emerald-400' : 'border-slate-100'
+                                        }`}
+                                    >
+                                        <div className="flex items-center space-x-4">
+                                            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl text-2xl">📈</div>
+                                            <div>
+                                                <p className="text-sm text-slate-500 font-medium">Toplam Gelir</p>
+                                                <h2 className="text-2xl font-bold text-emerald-600">
+                                                    {summary.income.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
+                                                </h2>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex items-center space-x-4">
-                                        <div className="p-3 bg-red-50 text-red-600 rounded-xl text-2xl">📉</div>
-                                        <div>
-                                            <p className="text-sm text-slate-500 font-medium">Toplam Gider</p>
-                                            <h2 className="text-2xl font-bold text-red-600">
-                                                {summary.expense.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
-                                            </h2>
+                                    </button>
+                                    <button
+                                        onClick={() => setFilterType('expense')}
+                                        className={`bg-white rounded-2xl p-6 shadow-sm border-2 transition-all text-left hover:shadow-md ${
+                                            filterType === 'expense' ? 'border-red-400' : 'border-slate-100'
+                                        }`}
+                                    >
+                                        <div className="flex items-center space-x-4">
+                                            <div className="p-3 bg-red-50 text-red-600 rounded-xl text-2xl">📉</div>
+                                            <div>
+                                                <p className="text-sm text-slate-500 font-medium">Toplam Gider</p>
+                                                <h2 className="text-2xl font-bold text-red-600">
+                                                    {summary.expense.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
+                                                </h2>
+                                            </div>
+                                        </div>
+                                    </button>
+                                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                                        <div className="flex items-center space-x-4">
+                                            <div className="p-3 bg-purple-50 text-purple-600 rounded-xl text-2xl">💎</div>
+                                            <div>
+                                                <p className="text-sm text-slate-500 font-medium">Aylık Yatırım</p>
+                                                <h2 className="text-2xl font-bold text-purple-600">
+                                                    {summary.monthInvestments.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
+                                                </h2>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -348,14 +602,29 @@
                                     {/* Liste */}
                                     <div className="lg:col-span-2">
                                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 h-full min-h-[400px]">
-                                            <h3 className="text-lg font-semibold mb-6">
-                                                {selectedMonth ? `${selectedMonth.split('-')[1]}/${selectedMonth.split('-')[0]} İşlemleri` : 'Son İşlemler'}
-                                            </h3>
+                                            <div className="flex items-center justify-between mb-6">
+                                                <h3 className="text-lg font-semibold">
+                                                    {selectedMonth ? `${selectedMonth.split('-')[1]}/${selectedMonth.split('-')[0]} İşlemleri` : 'Son İşlemler'}
+                                                    {filterType && (
+                                                        <span className={`ml-2 text-sm font-normal ${filterType === 'income' ? 'text-emerald-600' : 'text-red-600'}`}>
+                                                            ({filterType === 'income' ? 'Sadece Gelirler' : 'Sadece Giderler'})
+                                                        </span>
+                                                    )}
+                                                </h3>
+                                                {filterType && (
+                                                    <button
+                                                        onClick={() => setFilterType(null)}
+                                                        className="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 font-medium"
+                                                    >
+                                                        Filtreyi Temizle ✕
+                                                    </button>
+                                                )}
+                                            </div>
                                             
                                             {filteredTransactions.length === 0 ? (
                                                 <div className="flex flex-col items-center justify-center h-48 text-slate-400">
                                                     <span className="text-4xl mb-3 opacity-50">💰</span>
-                                                    <p>Bu ay için henüz hiçbir işlem eklenmedi.</p>
+                                                    <p>{filterType ? 'Bu filtre için işlem bulunamadı.' : 'Bu ay için henüz hiçbir işlem eklenmedi.'}</p>
                                                 </div>
                                             ) : (
                                                 <div className="space-y-3 overflow-y-auto pr-2 max-h-[500px] custom-scrollbar">
@@ -380,7 +649,7 @@
                                                             </div>
                                                             <div className="flex items-center space-x-4">
                                                                 <span className={`font-bold whitespace-nowrap ${t.type === 'expense' ? 'text-red-600' : 'text-emerald-600'}`}>
-                                                                    {t.type === 'expense' ? '-' : '+'} {t.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                    {t.type === 'expense' ? '-' : '+'} {t.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
                                                                 </span>
                                                                 <button 
                                                                     onClick={() => handleDelete(t.id)}
@@ -419,7 +688,7 @@
                                             <p className="text-sm text-slate-500 font-medium">Toplam Yatırım</p>
                                         </div>
                                         <h2 className="text-2xl font-bold text-blue-600">
-                                            {investmentSummary.totalInvested.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                            {investmentSummary.totalInvested.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
                                         </h2>
                                     </div>
                                     <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
@@ -435,7 +704,7 @@
                                             <p className="text-sm text-slate-500 font-medium">Toplam Kâr/Zarar</p>
                                         </div>
                                         <h2 className={`text-2xl font-bold ${investmentSummary.totalProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                                            {investmentSummary.totalProfit >= 0 ? '+' : ''}{investmentSummary.totalProfit.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                            {investmentSummary.totalProfit >= 0 ? '+' : ''}{investmentSummary.totalProfit.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
                                         </h2>
                                     </div>
                                 </div>
@@ -445,7 +714,21 @@
                                     {/* Yatırım Ekleme Formu */}
                                     <div className="lg:col-span-1">
                                         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
-                                            <h3 className="text-lg font-semibold mb-4">Yeni Yatırım Ekle</h3>
+                                            <h3 className="text-lg font-semibold mb-4">
+                                                {editingInvestment ? '✏️ Yatırımı Düzenle' : 'Yeni Yatırım Ekle'}
+                                            </h3>
+                                            
+                                            {editingInvestment && (
+                                                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+                                                    <span className="text-sm text-blue-700">Düzenleme modundasınız</span>
+                                                    <button
+                                                        onClick={handleCancelEdit}
+                                                        className="text-xs px-2 py-1 bg-white hover:bg-blue-100 rounded text-blue-600 font-medium"
+                                                    >
+                                                        İptal ✕
+                                                    </button>
+                                                </div>
+                                            )}
                                             
                                             <form onSubmit={handleInvestmentSubmit} className="space-y-4">
                                                 <div>
@@ -519,7 +802,7 @@
                                                     type="submit"
                                                     className="w-full py-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-medium"
                                                 >
-                                                    Yatırım Ekle
+                                                    {editingInvestment ? '✓ Güncelle' : 'Yatırım Ekle'}
                                                 </button>
                                             </form>
                                         </div>
@@ -602,10 +885,10 @@
                                                                                 <div className="ml-5 bg-white rounded-lg p-3 shadow-sm border border-emerald-100">
                                                                                     <div className="text-xs text-slate-500 mb-1">📅 {new Date(inv.buyDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
                                                                                     <div className="font-bold text-slate-900">
-                                                                                        {inv.quantity} adet × {inv.buyPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                        {inv.quantity} adet × {inv.buyPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
                                                                                     </div>
                                                                                     <div className="text-sm text-emerald-600 font-bold mt-1">
-                                                                                        Toplam: {totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                        Toplam: {totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
                                                                                     </div>
                                                                                 </div>
                                                                             </div>
@@ -630,10 +913,10 @@
                                                                                         <div className="ml-5 bg-white rounded-lg p-3 shadow-sm border border-red-100">
                                                                                             <div className="text-xs text-slate-500 mb-1">📅 {new Date(inv.sellDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
                                                                                             <div className="font-bold text-slate-900">
-                                                                                                {inv.quantity} adet × {inv.sellPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                                {inv.quantity} adet × {inv.sellPrice.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
                                                                                             </div>
                                                                                             <div className="text-sm text-red-600 font-bold mt-1">
-                                                                                                Toplam: {currentValue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                                Toplam: {currentValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
                                                                                             </div>
                                                                                         </div>
                                                                                     </div>
@@ -654,7 +937,7 @@
                                                                             </div>
                                                                             <div className="flex items-end justify-between">
                                                                                 <div className="text-3xl font-black">
-                                                                                    {profit >= 0 ? '+' : ''}{profit.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                                                                                    {profit >= 0 ? '+' : ''}{profit.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
                                                                                 </div>
                                                                                 <div className="text-xl font-bold">
                                                                                     {profit >= 0 ? '+' : ''}{profitPercent.toFixed(2)}%
@@ -676,18 +959,26 @@
                                                                     {/* Action Buttons */}
                                                                     <div className="flex space-x-2">
                                                                         {inv.status === 'active' && (
-                                                                            <button
-                                                                                onClick={() => handleSellInvestment(inv.id)}
-                                                                                className="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold rounded-xl transition-all shadow-md hover:shadow-lg transform hover:scale-105"
-                                                                            >
-                                                                                💵 Sat
-                                                                            </button>
+                                                                            <>
+                                                                                <button
+                                                                                    onClick={() => handleEditInvestment(inv)}
+                                                                                    className="flex-1 px-4 py-3 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-xl transition-all border-2 border-blue-200 hover:border-blue-300"
+                                                                                >
+                                                                                    ✏️ Düzenle
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={() => handleSellInvestment(inv.id)}
+                                                                                    className="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-bold rounded-xl transition-all shadow-md hover:shadow-lg transform hover:scale-105"
+                                                                                >
+                                                                                    💵 Sat
+                                                                                </button>
+                                                                            </>
                                                                         )}
                                                                         <button
                                                                             onClick={() => handleDeleteInvestment(inv.id)}
                                                                             className="px-4 py-3 bg-white hover:bg-red-50 text-red-600 font-bold rounded-xl transition-all border-2 border-red-200 hover:border-red-300"
                                                                         >
-                                                                            🗑️ Sil
+                                                                            🗑️
                                                                         </button>
                                                                     </div>
                                                                 </div>
@@ -697,6 +988,178 @@
                                                 </div>
                                             )}
                                         </div>
+                                    </div>
+
+                                </div>
+                            </>
+                        )}
+
+                        {/* Hesabım Ekranı */}
+                        {activeTab === 'account' && (
+                            <>
+                                <div className="max-w-3xl mx-auto space-y-6">
+                                    
+                                    {/* Profil Bilgileri */}
+                                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                                        <h3 className="text-lg font-semibold mb-6 flex items-center space-x-2">
+                                            <span>👤</span>
+                                            <span>Profil Bilgileri</span>
+                                        </h3>
+                                        
+                                        <div className="space-y-4">
+                                            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+                                                <div className="flex items-center space-x-3">
+                                                    <div className="p-2 bg-blue-100 rounded-lg text-blue-600">
+                                                        <span>📧</span>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-slate-500">E-posta</p>
+                                                        <p className="font-medium text-slate-900">{userEmail}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <button
+                                                onClick={handlePasswordChange}
+                                                className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors"
+                                            >
+                                                <div className="flex items-center space-x-3">
+                                                    <div className="p-2 bg-amber-100 rounded-lg text-amber-600">
+                                                        <span>🔐</span>
+                                                    </div>
+                                                    <div className="text-left">
+                                                        <p className="font-medium text-slate-900">Şifre Değiştir</p>
+                                                        <p className="text-xs text-slate-500">Hesap güvenliğinizi koruyun</p>
+                                                    </div>
+                                                </div>
+                                                <span className="text-slate-400">›</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Bildirimler */}
+                                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                                        <h3 className="text-lg font-semibold mb-6 flex items-center space-x-2">
+                                            <span>🔔</span>
+                                            <span>Bildirimler</span>
+                                        </h3>
+                                        
+                                        <div className="space-y-4">
+                                            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+                                                <div className="flex items-center space-x-3">
+                                                    <div className="p-2 bg-green-100 rounded-lg text-green-600">
+                                                        <span>💬</span>
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-medium text-slate-900">Bildirimler</p>
+                                                        <p className="text-xs text-slate-500">Önemli güncellemeleri al</p>
+                                                    </div>
+                                                </div>
+                                                <label className="relative inline-flex items-center cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={notifications}
+                                                        onChange={(e) => setNotifications(e.target.checked)}
+                                                        className="sr-only peer"
+                                                    />
+                                                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Tema */}
+                                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                                        <h3 className="text-lg font-semibold mb-6 flex items-center space-x-2">
+                                            <span>🎨</span>
+                                            <span>Tema</span>
+                                        </h3>
+                                        
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <button
+                                                onClick={() => setTheme('light')}
+                                                className={`p-4 rounded-xl border-2 transition-all ${
+                                                    theme === 'light' 
+                                                        ? 'border-blue-500 bg-blue-50' 
+                                                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                                                }`}
+                                            >
+                                                <div className="text-center">
+                                                    <div className="text-3xl mb-2">☀️</div>
+                                                    <p className="font-medium text-slate-900">Açık Tema</p>
+                                                    <p className="text-xs text-slate-500 mt-1">Gündüz modu</p>
+                                                </div>
+                                            </button>
+                                            
+                                            <button
+                                                onClick={() => setTheme('dark')}
+                                                className={`p-4 rounded-xl border-2 transition-all ${
+                                                    theme === 'dark' 
+                                                        ? 'border-blue-500 bg-blue-50' 
+                                                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                                                }`}
+                                            >
+                                                <div className="text-center">
+                                                    <div className="text-3xl mb-2">🌙</div>
+                                                    <p className="font-medium text-slate-900">Karanlık Tema</p>
+                                                    <p className="text-xs text-slate-500 mt-1">Gece modu (Yakında)</p>
+                                                </div>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Dil */}
+                                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                                        <h3 className="text-lg font-semibold mb-6 flex items-center space-x-2">
+                                            <span>🌍</span>
+                                            <span>Dil</span>
+                                        </h3>
+                                        
+                                        <div className="space-y-3">
+                                            <button
+                                                onClick={() => setLanguage('tr')}
+                                                className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${
+                                                    language === 'tr' 
+                                                        ? 'border-blue-500 bg-blue-50' 
+                                                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                                                }`}
+                                            >
+                                                <div className="flex items-center space-x-3">
+                                                    <span className="text-2xl">🇹🇷</span>
+                                                    <span className="font-medium text-slate-900">Türkçe</span>
+                                                </div>
+                                                {language === 'tr' && <span className="text-blue-500">✓</span>}
+                                            </button>
+                                            
+                                            <button
+                                                onClick={() => setLanguage('en')}
+                                                className={`w-full flex items-center justify-between p-4 rounded-xl border-2 transition-all ${
+                                                    language === 'en' 
+                                                        ? 'border-blue-500 bg-blue-50' 
+                                                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                                                }`}
+                                            >
+                                                <div className="flex items-center space-x-3">
+                                                    <span className="text-2xl">🇬🇧</span>
+                                                    <div className="text-left">
+                                                        <p className="font-medium text-slate-900">English</p>
+                                                        <p className="text-xs text-slate-500">Yakında</p>
+                                                    </div>
+                                                </div>
+                                                {language === 'en' && <span className="text-blue-500">✓</span>}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Çıkış Yap */}
+                                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                                        <button
+                                            onClick={handleClearAllData}
+                                            className="w-full flex items-center justify-center space-x-3 p-4 bg-red-50 hover:bg-red-100 rounded-xl transition-colors border-2 border-red-200 hover:border-red-300"
+                                        >
+                                            <span className="text-red-600 text-xl">⚠️</span>
+                                            <span className="font-bold text-red-600">Tüm Verileri Temizle & Sıfırla</span>
+                                        </button>
                                     </div>
 
                                 </div>
